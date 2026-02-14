@@ -207,6 +207,7 @@ class VideoState(rx.State):
         self.is_processing = True
         self.error_message = ""
         self.processing_progress = 0
+        yield
         try:
             upload_dir = rx.get_upload_dir()
             input_path = upload_dir / self.uploaded_file
@@ -259,6 +260,7 @@ class VideoState(rx.State):
             while process.returncode is None:
                 if self.processing_progress < 90:
                     self.processing_progress += 5
+                    yield
                 await asyncio.sleep(0.5)
                 if process.returncode is not None:
                     break
@@ -276,12 +278,15 @@ class VideoState(rx.State):
                 self.processed_file = output_filename
                 self.is_processed = True
                 self.processing_status = "Processing complete!"
+            yield
         except Exception as e:
             logging.exception(f"Processing error: {e}")
             self.error_message = f"Error: {str(e)}"
             self.processing_status = "Failed"
+            yield
         finally:
             self.is_processing = False
+            yield
 
     @rx.event
     async def generate_preview(self):
@@ -289,7 +294,8 @@ class VideoState(rx.State):
             return
         self.preview_ready = False
         yield
-        await self._process_ffmpeg(is_preview=True)
+        async for _ in self._process_ffmpeg(is_preview=True):
+            yield
 
     @rx.event
     async def process_video(self):
@@ -297,7 +303,8 @@ class VideoState(rx.State):
             return
         self.is_processed = False
         yield
-        await self._process_ffmpeg(is_preview=False)
+        async for _ in self._process_ffmpeg(is_preview=False):
+            yield
 
     @rx.event
     def reset_upload(self):

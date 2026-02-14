@@ -125,7 +125,15 @@ def time_controls() -> rx.Component:
             ),
             rx.el.div(
                 rx.el.button(
-                    "Generate Preview (5s)",
+                    rx.cond(
+                        VideoState.is_processing,
+                        rx.el.span(
+                            rx.icon("loader-circle", class_name="h-4 w-4 mr-2 animate-spin"),
+                            "Processing...",
+                            class_name="flex items-center justify-center",
+                        ),
+                        "Generate Preview (5s)",
+                    ),
                     on_click=VideoState.generate_preview,
                     disabled=~VideoState.is_input_valid | VideoState.is_processing,
                     class_name=rx.cond(
@@ -135,7 +143,15 @@ def time_controls() -> rx.Component:
                     ),
                 ),
                 rx.el.button(
-                    "Process Full Video",
+                    rx.cond(
+                        VideoState.is_processing,
+                        rx.el.span(
+                            rx.icon("loader-circle", class_name="h-4 w-4 mr-2 animate-spin"),
+                            "Processing...",
+                            class_name="flex items-center justify-center",
+                        ),
+                        "Process Full Video",
+                    ),
                     on_click=VideoState.process_video,
                     disabled=~VideoState.is_input_valid | VideoState.is_processing,
                     class_name=rx.cond(

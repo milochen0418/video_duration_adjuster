@@ -6,17 +6,20 @@ def stat_item(icon_name: str, label: str, value: str) -> rx.Component:
     return rx.el.div(
         rx.el.div(
             rx.icon(icon_name, class_name="h-5 w-5 text-violet-400"),
-            class_name="p-2 rounded-lg bg-violet-500/10 mr-4",
+            class_name="p-2 rounded-lg bg-violet-500/10 mr-3 shrink-0",
         ),
         rx.el.div(
             rx.el.p(
                 label,
                 class_name="text-xs text-gray-500 font-bold uppercase tracking-wider",
             ),
-            rx.el.p(value, class_name="text-lg font-semibold text-white"),
-            class_name="flex flex-col",
+            rx.el.p(
+                value,
+                class_name="text-base md:text-lg font-semibold text-white leading-tight break-words",
+            ),
+            class_name="flex flex-col min-w-0",
         ),
-        class_name="flex items-center p-4 bg-gray-800/40 rounded-2xl border border-white/5",
+        class_name="flex items-center p-4 bg-gray-800/40 rounded-2xl border border-white/5 min-w-0",
     )
 
 
@@ -105,7 +108,7 @@ def video_info_card() -> rx.Component:
                             f"{VideoState.width}x{VideoState.height}",
                         ),
                         stat_item("database", "Size", f"{VideoState.file_size_mb} MB"),
-                        class_name="grid grid-cols-1 md:grid-cols-3 gap-4",
+                        class_name="grid grid-cols-1 gap-4",
                     ),
                     class_name="mb-8",
                 ),
