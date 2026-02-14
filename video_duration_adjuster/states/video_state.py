@@ -201,8 +201,8 @@ class VideoState(rx.State):
 
     async def _process_ffmpeg(self, is_preview: bool = False):
         """Helper to run ffmpeg command for processing or preview."""
-        import subprocess
         import asyncio
+        from collections import deque
 
         self.is_processing = True
         self.error_message = ""
@@ -236,6 +236,9 @@ class VideoState(rx.State):
                 )
             cmd = [
                 "ffmpeg",
+                "-progress",
+                "pipe:1",
+                "-nostats",
                 "-i",
                 str(input_path),
                 "-filter_complex",
@@ -254,19 +257,49 @@ class VideoState(rx.State):
                     "Processing full video... This may take a while."
                 )
             cmd.append(str(output_path))
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+
+            expected_output_seconds = (
+                5.0 if is_preview else max(0.001, self.calculated_target_total)
             )
-            while process.returncode is None:
-                if self.processing_progress < 90:
-                    self.processing_progress += 5
-                    yield
-                await asyncio.sleep(0.5)
-                if process.returncode is not None:
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            )
+
+            if process.stdout is None:
+                raise RuntimeError("FFmpeg output stream is unavailable")
+
+            output_tail: deque[str] = deque(maxlen=80)
+
+            while True:
+                raw_line = await process.stdout.readline()
+                if not raw_line:
                     break
-            stdout, stderr = await process.communicate()
+
+                line = raw_line.decode(errors="replace").strip()
+                if line:
+                    output_tail.append(line)
+
+                if line.startswith("out_time_ms="):
+                    try:
+                        out_time_ms = int(line.split("=", 1)[1])
+                        out_seconds = out_time_ms / 1_000_000
+                        percent = int((out_seconds / expected_output_seconds) * 100)
+                        percent = max(1, min(99, percent))
+                        if percent > self.processing_progress:
+                            self.processing_progress = percent
+                            yield
+                    except ValueError:
+                        pass
+
+                if line == "progress=end" and self.processing_progress < 99:
+                    self.processing_progress = 99
+                    yield
+
+            await process.wait()
+
             if process.returncode != 0:
-                error_log = stderr.decode()
+                error_log = "\n".join(output_tail)
                 logging.error(f"FFmpeg error: {error_log}")
                 raise RuntimeError("FFmpeg processing failed. Check logs.")
             self.processing_progress = 100

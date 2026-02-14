@@ -93,7 +93,7 @@ def video_info_card() -> rx.Component:
                             f"{VideoState.width}x{VideoState.height}",
                         ),
                         stat_item("database", "Size", f"{VideoState.file_size_mb} MB"),
-                        class_name="grid grid-cols-1 gap-4",
+                        class_name="grid grid-cols-1 md:grid-cols-3 gap-4",
                     ),
                     class_name="mb-8 p-6 bg-gray-900/50 rounded-2xl border border-white/5",
                 ),
