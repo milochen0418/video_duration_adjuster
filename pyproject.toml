@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "video-duration-adjuster"
+version = "0.1.0"
+description = "A Reflex app for video duration adjuster"
+authors = ["milochen0418 <milo_chen@mail2000.com.tw>"]
+readme = "README.md"
+packages = [{ include = "video_duration_adjuster" }]
+
+[tool.poetry.dependencies]
+python = "~3.11"
+reflex = "0.8.24.post1"
+moviepy = "*"
+granian = "2.7.1"
+reflex-mouse-track = "*"
+fastapi = "*"
+psutil = "^7.2.2"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "playwright (>=1.58.0,<2.0.0)",
+    "pytest (>=9.0.2,<10.0.0)"
+]

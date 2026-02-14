@@ -1,2 +1,4 @@
 
+# This project is managed by Poetry.
+# Source of truth: pyproject.toml
 reflex==0.8.24.post1
