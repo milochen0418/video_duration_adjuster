@@ -9,7 +9,6 @@ packages = [{ include = "video_duration_adjuster" }]
 [tool.poetry.dependencies]
 python = "~3.11"
 reflex = "0.8.24.post1"
-moviepy = "*"
 granian = "2.7.1"
 reflex-mouse-track = "*"
 fastapi = "*"

@@ -9,7 +9,7 @@
 
 ## Phase 2: Video Processing Backend ✅
 - [x] Implement video file handling and metadata extraction
-- [x] Create video splitting logic using moviepy
+- [x] Create video processing logic using ffmpeg/ffprobe subprocess flow
 - [x] Add segment duration calculation based on total length and segment count
 - [x] Implement progress tracking during video processing
 - [x] Store generated clips for download
