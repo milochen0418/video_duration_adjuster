@@ -1,25 +1,22 @@
-# Video Time Adjustment Tool - Implementation Plan
+# Video Splitter Web Application
 
-## Phase 1: Upload Interface & Video Metadata Display ✅
-- [x] Create modern responsive layout with header, main content area
-- [x] Implement drag-and-drop file upload zone with visual feedback
-- [x] Support MP4, MOV, WebM video formats
-- [x] Display uploaded video metadata (duration, resolution, file size)
-- [x] Add video preview player for original file
-- [x] Style with modern dark theme and smooth animations
+## Phase 1: UI Layout and File Upload ✅
+- [x] Create main page layout with modern, clean design
+- [x] Implement drag-and-drop file upload area with visual feedback
+- [x] Add file selection button as alternative upload method
+- [x] Create video metadata display section (duration, resolution, file size)
+- [x] Build segment count control with slider and numerical input
 
-## Phase 2: Time Input Interface & Speed Calculator ✅
-- [x] Create target duration input with HH:MM:SS format
-- [x] Add alternative seconds input option
-- [x] Build real-time speed ratio calculator (shows 1.5x, 0.8x etc.)
-- [x] Display visual indicator for speed-up vs slow-down
-- [x] Add input validation and error handling
-- [x] Show estimated output file information
+## Phase 2: Video Processing Backend ✅
+- [x] Implement video file handling and metadata extraction
+- [x] Create video splitting logic using moviepy
+- [x] Add segment duration calculation based on total length and segment count
+- [x] Implement progress tracking during video processing
+- [x] Store generated clips for download
 
-## Phase 3: Video Processing with Audio Pitch Preservation & Download ✅
-- [x] Implement FFmpeg backend processing with rubberband filter for audio time-stretching
-- [x] Create preview generation (first 5 seconds of processed video)
-- [x] Add processing progress bar with status updates
-- [x] Implement processed video download functionality
-- [x] Add error handling for processing failures
-- [x] Final UI polish and mobile responsiveness
+## Phase 3: Download and Output Interface ✅
+- [x] Create output section displaying all generated clips
+- [x] Implement individual download links for each segment
+- [x] Add "Download All as ZIP" functionality
+- [x] Add processing status indicators and completion feedback
+- [x] Final polish and user experience improvements
