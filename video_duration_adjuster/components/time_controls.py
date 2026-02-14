@@ -197,5 +197,5 @@ def time_controls() -> rx.Component:
                 ),
             ),
         ),
-        class_name="w-full max-w-xl p-8 rounded-[2.5rem] bg-gray-950 border border-white/5 h-fit shadow-2xl",
+        class_name="w-full p-8 rounded-[2.5rem] bg-gray-950 border border-white/5 h-fit shadow-2xl",
     )
