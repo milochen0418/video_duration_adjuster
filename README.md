@@ -15,19 +15,27 @@ This project is managed with [Poetry](https://python-poetry.org/).
 Based on this project's dependencies, install the following system-level packages first via Homebrew (macOS):
 
 ```bash
-brew install python@3.11 ffmpeg poetry
+brew install python@3.11 ffmpeg-full poetry
 ```
 
 | Package | Reason |
 |---------|--------|
 | `python@3.11` | The project requires Python ~3.11 as specified in `pyproject.toml` |
-| `ffmpeg` | Required by `moviepy` for video cutting, merging, and transcoding |
+| `ffmpeg-full` | Required for video processing and includes FFmpeg compiled with `--enable-librubberband` |
 | `poetry` | Python dependency manager used to manage this project |
 
 After installing Playwright (via `poetry install`), you also need to download browser binaries:
 
 ```bash
 poetry run playwright install
+```
+
+This project currently uses `ffmpeg-full` on macOS for audio speed optimization.
+Reason: the default `ffmpeg` formula may not include the `rubberband` filter, while `ffmpeg-full` is compiled with `--enable-librubberband`.
+Because of this requirement, this project should use `ffmpeg-full` instead of the default `ffmpeg` formula.
+
+```bash
+brew install ffmpeg-full
 ```
 
 ### Installation

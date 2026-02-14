@@ -4,6 +4,7 @@ import string
 import os
 from typing import Optional
 import logging
+import subprocess
 
 
 class VideoState(rx.State):
@@ -30,6 +31,39 @@ class VideoState(rx.State):
     processed_file: str = ""
     is_processed: bool = False
     error_message: str = ""
+    using_rubberband: bool = False
+
+    @staticmethod
+    def _ffmpeg_has_rubberband(ffmpeg_bin: str) -> bool:
+        try:
+            result = subprocess.run(
+                [ffmpeg_bin, "-hide_banner", "-filters"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            combined = f"{result.stdout}\n{result.stderr}".lower()
+            return "rubberband" in combined
+        except Exception:
+            return False
+
+    @classmethod
+    def _resolve_ffmpeg_binary(cls) -> tuple[str, bool]:
+        ffmpeg_full_path = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
+        if os.path.exists(ffmpeg_full_path):
+            if cls._ffmpeg_has_rubberband(ffmpeg_full_path):
+                return ffmpeg_full_path, True
+            return ffmpeg_full_path, False
+
+        default_ffmpeg = "ffmpeg"
+        return default_ffmpeg, cls._ffmpeg_has_rubberband(default_ffmpeg)
+
+    @staticmethod
+    def _resolve_ffprobe_binary() -> str:
+        ffprobe_full_path = "/opt/homebrew/opt/ffmpeg-full/bin/ffprobe"
+        if os.path.exists(ffprobe_full_path):
+            return ffprobe_full_path
+        return "ffprobe"
 
     @staticmethod
     def _build_atempo_chain(tempo: float) -> str:
@@ -44,6 +78,21 @@ class VideoState(rx.State):
         remaining = max(0.5, min(2.0, remaining))
         factors.append(remaining)
         return ",".join(f"atempo={factor:.6f}" for factor in factors)
+
+    @staticmethod
+    def _build_rubberband_filter(tempo: float) -> str:
+        safe_tempo = max(0.01, tempo)
+        return (
+            "rubberband="
+            f"tempo={safe_tempo:.6f}:"
+            "transients=crisp:"
+            "detector=compound:"
+            "phase=laminar:"
+            "window=standard:"
+            "smoothing=on:"
+            "formant=preserved:"
+            "pitchq=quality"
+        )
 
     @rx.var
     def calculated_target_total(self) -> float:
@@ -150,12 +199,12 @@ class VideoState(rx.State):
             self.uploaded_file = filename
             self.file_name = file.name
             self.file_size_mb = round(len(upload_data) / (1024 * 1024), 2)
-            import subprocess
             import json
 
             try:
+                ffprobe_bin = self._resolve_ffprobe_binary()
                 cmd = [
-                    "ffprobe",
+                    ffprobe_bin,
                     "-v",
                     "quiet",
                     "-print_format",
@@ -165,6 +214,13 @@ class VideoState(rx.State):
                     str(file_path),
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    stderr_text = (result.stderr or "").strip()
+                    raise RuntimeError(
+                        f"ffprobe failed with code {result.returncode}: {stderr_text}"
+                    )
+                if not (result.stdout or "").strip():
+                    raise RuntimeError("ffprobe returned empty metadata output")
                 metadata = json.loads(result.stdout)
                 format_info = metadata.get("format", {})
                 self.duration_seconds = float(format_info.get("duration", 0))
@@ -182,13 +238,16 @@ class VideoState(rx.State):
                     s.get("codec_type") == "audio"
                     for s in metadata.get("streams", [])
                 )
+                if self.duration_seconds <= 0:
+                    raise RuntimeError("Unable to parse valid duration from ffprobe output")
             except Exception as e:
                 logging.exception("Unexpected error")
-                logging.warning(f"FFprobe failed, falling back to mock data: {e}")
-                self.duration_seconds = random.uniform(30.0, 300.0)
-                self.width = 1920
-                self.height = 1080
-                self.has_audio = True
+                logging.warning(f"FFprobe failed, metadata set to safe defaults: {e}")
+                self.duration_seconds = 0.0
+                self.width = 0
+                self.height = 0
+                self.has_audio = False
+                self.error_message = "Could not read video metadata. Please verify ffprobe/ffmpeg setup."
             hours = int(self.duration_seconds // 3600)
             minutes = int(self.duration_seconds % 3600 // 60)
             seconds = int(self.duration_seconds % 60)
@@ -216,6 +275,7 @@ class VideoState(rx.State):
             ratio = self.speed_ratio
             if ratio <= 0:
                 raise ValueError("Invalid speed ratio")
+            ffmpeg_bin, ffmpeg_has_rubberband = self._resolve_ffmpeg_binary()
             video_speed_factor = 1.0 / ratio
             tempo = ratio
             output_filename = (
@@ -229,13 +289,16 @@ class VideoState(rx.State):
             video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
             has_audio = self.has_audio
             filter_complex = video_filter
+            self.using_rubberband = False
             if has_audio:
-                atempo_chain = self._build_atempo_chain(tempo)
-                filter_complex = (
-                    f"{video_filter};[0:a]{atempo_chain}[a]"
-                )
+                if ffmpeg_has_rubberband:
+                    audio_filter = self._build_rubberband_filter(tempo)
+                    self.using_rubberband = True
+                else:
+                    audio_filter = self._build_atempo_chain(tempo)
+                filter_complex = f"{video_filter};[0:a]{audio_filter}[a]"
             cmd = [
-                "ffmpeg",
+                ffmpeg_bin,
                 "-progress",
                 "pipe:1",
                 "-nostats",
@@ -251,11 +314,25 @@ class VideoState(rx.State):
                 cmd.extend(["-map", "[a]"])
             if is_preview:
                 cmd.extend(["-t", "5"])
-                self.processing_status = "Generating preview..."
+                if has_audio and self.using_rubberband:
+                    self.processing_status = "Generating preview with Rubber Band audio optimization..."
+                elif has_audio:
+                    self.processing_status = "Generating preview with standard audio tempo processing..."
+                else:
+                    self.processing_status = "Generating preview..."
             else:
-                self.processing_status = (
-                    "Processing full video... This may take a while."
-                )
+                if has_audio and self.using_rubberband:
+                    self.processing_status = (
+                        "Processing full video with Rubber Band audio optimization... This may take a while."
+                    )
+                elif has_audio:
+                    self.processing_status = (
+                        "Processing full video with standard audio tempo processing... This may take a while."
+                    )
+                else:
+                    self.processing_status = (
+                        "Processing full video... This may take a while."
+                    )
             cmd.append(str(output_path))
 
             expected_output_seconds = (
