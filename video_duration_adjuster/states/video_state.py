@@ -16,6 +16,7 @@ class VideoState(rx.State):
     width: int = 0
     height: int = 0
     file_size_mb: float = 0.0
+    has_audio: bool = False
     target_hours: str = "0"
     target_minutes: str = "0"
     target_seconds: str = "0"
@@ -29,6 +30,20 @@ class VideoState(rx.State):
     processed_file: str = ""
     is_processed: bool = False
     error_message: str = ""
+
+    @staticmethod
+    def _build_atempo_chain(tempo: float) -> str:
+        factors = []
+        remaining = tempo
+        while remaining > 2.0:
+            factors.append(2.0)
+            remaining /= 2.0
+        while 0 < remaining < 0.5:
+            factors.append(0.5)
+            remaining /= 0.5
+        remaining = max(0.5, min(2.0, remaining))
+        factors.append(remaining)
+        return ",".join(f"atempo={factor:.6f}" for factor in factors)
 
     @rx.var
     def calculated_target_total(self) -> float:
@@ -93,6 +108,28 @@ class VideoState(rx.State):
     def set_uploading(self, uploading: bool):
         self.is_uploading = uploading
 
+    @staticmethod
+    def _normalize_numeric_input(value: str | int | float | None) -> str:
+        if value is None:
+            return ""
+        return str(value)
+
+    @rx.event
+    def update_target_hours(self, value: str | int | float | None):
+        self.target_hours = self._normalize_numeric_input(value)
+
+    @rx.event
+    def update_target_minutes(self, value: str | int | float | None):
+        self.target_minutes = self._normalize_numeric_input(value)
+
+    @rx.event
+    def update_target_seconds(self, value: str | int | float | None):
+        self.target_seconds = self._normalize_numeric_input(value)
+
+    @rx.event
+    def update_target_total_seconds(self, value: str | int | float | None):
+        self.target_total_seconds = self._normalize_numeric_input(value)
+
     @rx.event
     async def handle_upload(self, files: list[rx.UploadFile]):
         if not files:
@@ -141,22 +178,23 @@ class VideoState(rx.State):
                 )
                 self.width = int(video_stream.get("width", 0))
                 self.height = int(video_stream.get("height", 0))
+                self.has_audio = any(
+                    s.get("codec_type") == "audio"
+                    for s in metadata.get("streams", [])
+                )
             except Exception as e:
                 logging.exception("Unexpected error")
-                import logging
-
                 logging.warning(f"FFprobe failed, falling back to mock data: {e}")
                 self.duration_seconds = random.uniform(30.0, 300.0)
                 self.width = 1920
                 self.height = 1080
+                self.has_audio = True
             hours = int(self.duration_seconds // 3600)
             minutes = int(self.duration_seconds % 3600 // 60)
             seconds = int(self.duration_seconds % 60)
             self.duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             self.is_uploaded = True
         except Exception as e:
-            import logging
-
             logging.exception(f"Error saving video: {e}")
             yield rx.toast("Failed to process video file.", variant="error")
         self.is_uploading = False
@@ -187,7 +225,14 @@ class VideoState(rx.State):
             output_path = upload_dir / output_filename
             if output_path.exists():
                 output_path.unlink()
-            filter_complex = f"[0:v]setpts=PTS*{video_speed_factor}[v];[0:a]rubberband=tempo={tempo}[a]"
+            video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
+            has_audio = self.has_audio
+            filter_complex = video_filter
+            if has_audio:
+                atempo_chain = self._build_atempo_chain(tempo)
+                filter_complex = (
+                    f"{video_filter};[0:a]{atempo_chain}[a]"
+                )
             cmd = [
                 "ffmpeg",
                 "-i",
@@ -196,10 +241,10 @@ class VideoState(rx.State):
                 filter_complex,
                 "-map",
                 "[v]",
-                "-map",
-                "[a]",
                 "-y",
             ]
+            if has_audio:
+                cmd.extend(["-map", "[a]"])
             if is_preview:
                 cmd.extend(["-t", "5"])
                 self.processing_status = "Generating preview..."
@@ -207,7 +252,7 @@ class VideoState(rx.State):
                 self.processing_status = (
                     "Processing full video... This may take a while."
                 )
-            cmd.append(output_path)
+            cmd.append(str(output_path))
             process = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
@@ -220,8 +265,6 @@ class VideoState(rx.State):
             stdout, stderr = await process.communicate()
             if process.returncode != 0:
                 error_log = stderr.decode()
-                import logging
-
                 logging.error(f"FFmpeg error: {error_log}")
                 raise RuntimeError("FFmpeg processing failed. Check logs.")
             self.processing_progress = 100
@@ -234,8 +277,6 @@ class VideoState(rx.State):
                 self.is_processed = True
                 self.processing_status = "Processing complete!"
         except Exception as e:
-            import logging
-
             logging.exception(f"Processing error: {e}")
             self.error_message = f"Error: {str(e)}"
             self.processing_status = "Failed"
@@ -268,6 +309,7 @@ class VideoState(rx.State):
         self.width = 0
         self.height = 0
         self.file_size_mb = 0.0
+        self.has_audio = False
         self.is_processing = False
         self.processing_progress = 0
         self.processing_status = ""

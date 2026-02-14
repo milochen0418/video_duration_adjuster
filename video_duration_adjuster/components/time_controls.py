@@ -81,17 +81,17 @@ def time_controls() -> rx.Component:
                 VideoState.input_mode == "time",
                 rx.el.div(
                     input_field(
-                        "Hours", VideoState.target_hours, VideoState.set_target_hours
+                        "Hours", VideoState.target_hours, VideoState.update_target_hours
                     ),
                     input_field(
                         "Minutes",
                         VideoState.target_minutes,
-                        VideoState.set_target_minutes,
+                        VideoState.update_target_minutes,
                     ),
                     input_field(
                         "Seconds",
                         VideoState.target_seconds,
-                        VideoState.set_target_seconds,
+                        VideoState.update_target_seconds,
                     ),
                     class_name="flex flex-col md:flex-row gap-4",
                 ),
@@ -99,7 +99,7 @@ def time_controls() -> rx.Component:
                     input_field(
                         "Total Seconds",
                         VideoState.target_total_seconds,
-                        VideoState.set_target_total_seconds,
+                        VideoState.update_target_total_seconds,
                     )
                 ),
             ),
