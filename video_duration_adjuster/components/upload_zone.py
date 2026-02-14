@@ -15,11 +15,11 @@ def upload_zone() -> rx.Component:
                         ),
                         rx.el.p(
                             "Processing Video...",
-                            class_name="text-xl font-semibold text-white",
+                            class_name="text-xl font-semibold text-gray-900",
                         ),
                         rx.el.p(
                             "Hang tight, we're analyzing your file",
-                            class_name="text-gray-400 mt-2",
+                            class_name="text-gray-600 mt-2",
                         ),
                         class_name="flex flex-col items-center",
                     ),
@@ -33,31 +33,31 @@ def upload_zone() -> rx.Component:
                         ),
                         rx.el.h3(
                             "Upload your video",
-                            class_name="text-xl font-bold text-white mb-2",
+                            class_name="text-xl font-bold text-gray-900 mb-2",
                         ),
                         rx.el.p(
                             "Drag and drop or click to browse",
-                            class_name="text-gray-400 text-center mb-6",
+                            class_name="text-gray-600 text-center mb-6",
                         ),
                         rx.el.div(
                             rx.el.span(
                                 "MP4",
-                                class_name="px-3 py-1 rounded-md bg-gray-800 text-gray-400 text-xs font-bold border border-gray-700",
+                                class_name="px-3 py-1 rounded-md bg-gray-100 text-gray-600 text-xs font-bold border border-gray-200",
                             ),
                             rx.el.span(
                                 "MOV",
-                                class_name="px-3 py-1 rounded-md bg-gray-800 text-gray-400 text-xs font-bold border border-gray-700",
+                                class_name="px-3 py-1 rounded-md bg-gray-100 text-gray-600 text-xs font-bold border border-gray-200",
                             ),
                             rx.el.span(
                                 "WEBM",
-                                class_name="px-3 py-1 rounded-md bg-gray-800 text-gray-400 text-xs font-bold border border-gray-700",
+                                class_name="px-3 py-1 rounded-md bg-gray-100 text-gray-600 text-xs font-bold border border-gray-200",
                             ),
                             class_name="flex gap-2 justify-center",
                         ),
                         class_name="flex flex-col items-center",
                     ),
                 ),
-                class_name="group w-full max-w-xl p-12 border-2 border-dashed border-gray-700 hover:border-violet-500/50 rounded-3xl bg-gray-900/50 hover:bg-gray-800/50 transition-all cursor-pointer flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500",
+                class_name="group w-full max-w-xl p-12 border-2 border-dashed border-gray-300 hover:border-violet-500/50 rounded-3xl bg-white hover:bg-gray-50 transition-all cursor-pointer flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500 shadow-sm",
             )
         ),
         id="video_upload",

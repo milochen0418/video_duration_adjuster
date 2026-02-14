@@ -13,11 +13,11 @@ def index() -> rx.Component:
                 rx.el.div(
                     rx.el.h1(
                         "Manipulate Time in Seconds.",
-                        class_name="text-4xl md:text-6xl font-black text-white text-center mb-6 tracking-tight leading-tight",
+                        class_name="text-4xl md:text-6xl font-black text-gray-900 text-center mb-6 tracking-tight leading-tight",
                     ),
                     rx.el.p(
                         "Change the duration of your videos without losing quality. We preserve audio pitch automatically using professional algorithms.",
-                        class_name="text-lg md:text-xl text-gray-400 text-center max-w-2xl mx-auto mb-16 font-medium",
+                        class_name="text-lg md:text-xl text-gray-600 text-center max-w-2xl mx-auto mb-16 font-medium",
                     ),
                     class_name="pt-12 md:pt-20",
                 ),
@@ -27,15 +27,15 @@ def index() -> rx.Component:
                 ),
                 class_name="max-w-6xl mx-auto px-6 pb-24",
             ),
-            class_name="flex-1",
+            class_name="flex-1 pt-20",
         ),
         rx.el.div(
-            class_name="fixed -bottom-[20vh] -left-[10vw] w-[50vw] h-[50vh] bg-violet-600/10 blur-[120px] rounded-full -z-10"
+            class_name="fixed -bottom-[20vh] -left-[10vw] w-[50vw] h-[50vh] bg-violet-300/20 blur-[120px] rounded-full -z-10"
         ),
         rx.el.div(
-            class_name="fixed -top-[10vh] -right-[10vw] w-[40vw] h-[40vh] bg-fuchsia-600/10 blur-[100px] rounded-full -z-10"
+            class_name="fixed -top-[10vh] -right-[10vw] w-[40vw] h-[40vh] bg-fuchsia-300/20 blur-[100px] rounded-full -z-10"
         ),
-        class_name="min-h-screen bg-gray-950 font-['Inter'] relative overflow-x-hidden",
+        class_name="min-h-screen bg-white font-['Inter'] relative overflow-x-hidden",
     )
 
 

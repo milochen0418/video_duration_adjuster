@@ -16,12 +16,12 @@ def navbar() -> rx.Component:
                 rx.el.a(
                     "Documentation",
                     href="#",
-                    class_name="text-gray-400 hover:text-white transition-colors text-sm font-medium",
+                    class_name="text-gray-600 hover:text-gray-900 transition-colors text-sm font-medium",
                 ),
                 rx.el.a(
                     rx.el.button(
                         "Github",
-                        class_name="px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 transition-all text-sm font-medium",
+                        class_name="px-4 py-2 rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition-all text-sm font-medium",
                     ),
                     href="https://github.com",
                 ),
@@ -29,5 +29,5 @@ def navbar() -> rx.Component:
             ),
             class_name="max-w-6xl mx-auto flex justify-between items-center px-6 h-20",
         ),
-        class_name="w-full border-b border-white/5 bg-gray-950/50 backdrop-blur-md sticky top-0 z-50",
+        class_name="w-full border-b border-gray-200 bg-white/95 backdrop-blur-md fixed top-0 left-0 z-[1000]",
     )

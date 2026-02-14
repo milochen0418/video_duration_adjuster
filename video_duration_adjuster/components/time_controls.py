@@ -6,13 +6,13 @@ def input_field(
     label: str, value_var: rx.Var, on_change: rx.event.EventType
 ) -> rx.Component:
     return rx.el.div(
-        rx.el.label(label, class_name="text-xs text-gray-500 font-bold mb-1 ml-1"),
+        rx.el.label(label, class_name="text-xs text-gray-600 font-bold mb-1 ml-1"),
         rx.el.input(
             type="number",
             placeholder="0",
             default_value=value_var,
             on_change=on_change.debounce(300),
-            class_name="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all",
+            class_name="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-gray-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all",
         ),
         class_name="flex flex-col flex-1",
     )
@@ -34,18 +34,18 @@ def speed_indicator() -> rx.Component:
                     None,
                 ),
             ),
-            class_name="p-3 rounded-2xl bg-white/5 border border-white/10",
+            class_name="p-3 rounded-2xl bg-gray-50 border border-gray-200",
         ),
         rx.el.div(
             rx.el.p(
-                "Playback Speed", class_name="text-xs text-gray-500 font-bold uppercase"
+                "Playback Speed", class_name="text-xs text-gray-600 font-bold uppercase"
             ),
             rx.el.p(
-                VideoState.speed_description, class_name="text-xl font-black text-white"
+                VideoState.speed_description, class_name="text-xl font-black text-gray-900"
             ),
             class_name="flex flex-col ml-4",
         ),
-        class_name="flex items-center p-6 bg-gray-900/50 rounded-3xl border border-white/5",
+        class_name="flex items-center p-6 bg-white rounded-3xl border border-gray-200",
     )
 
 
@@ -53,7 +53,7 @@ def time_controls() -> rx.Component:
     return rx.el.div(
         rx.el.div(
             rx.el.div(
-                rx.el.h3("Target Duration", class_name="text-xl font-bold text-white"),
+                rx.el.h3("Target Duration", class_name="text-xl font-bold text-gray-900"),
                 rx.el.div(
                     rx.el.button(
                         "Time Format",
@@ -61,7 +61,7 @@ def time_controls() -> rx.Component:
                         class_name=rx.cond(
                             VideoState.input_mode == "time",
                             "px-4 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold transition-all",
-                            "px-4 py-1.5 rounded-lg bg-gray-800 text-gray-400 text-xs font-bold hover:bg-gray-700 transition-all",
+                            "px-4 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-bold hover:bg-gray-200 transition-all",
                         ),
                     ),
                     rx.el.button(
@@ -70,10 +70,10 @@ def time_controls() -> rx.Component:
                         class_name=rx.cond(
                             VideoState.input_mode == "seconds",
                             "px-4 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold transition-all",
-                            "px-4 py-1.5 rounded-lg bg-gray-800 text-gray-400 text-xs font-bold hover:bg-gray-700 transition-all",
+                            "px-4 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-bold hover:bg-gray-200 transition-all",
                         ),
                     ),
-                    class_name="flex gap-2 p-1 bg-gray-900 rounded-xl border border-white/5",
+                    class_name="flex gap-2 p-1 bg-gray-50 rounded-xl border border-gray-200",
                 ),
                 class_name="flex justify-between items-center mb-6",
             ),
@@ -119,7 +119,7 @@ def time_controls() -> rx.Component:
                 rx.icon("info", class_name="h-5 w-5 text-violet-400 mr-3"),
                 rx.el.p(
                     "We use high-quality audio time-stretching to ensure voices don't sound like chipmunks when speeding up.",
-                    class_name="text-sm text-gray-400",
+                    class_name="text-sm text-gray-600",
                 ),
                 class_name="flex items-start p-6 bg-violet-500/5 rounded-3xl border border-violet-500/10 mt-8 mb-8",
             ),
@@ -138,8 +138,8 @@ def time_controls() -> rx.Component:
                     disabled=~VideoState.is_input_valid | VideoState.is_processing,
                     class_name=rx.cond(
                         VideoState.is_input_valid & ~VideoState.is_processing,
-                        "flex-1 py-4 rounded-2xl bg-gray-800 text-white font-bold text-sm border border-gray-700 hover:bg-gray-700 transition-all cursor-pointer",
-                        "flex-1 py-4 rounded-2xl bg-gray-800/50 text-gray-600 font-bold text-sm border border-gray-800 cursor-not-allowed",
+                        "flex-1 py-4 rounded-2xl bg-gray-900 text-white font-bold text-sm border border-gray-900 hover:bg-gray-800 transition-all cursor-pointer",
+                        "flex-1 py-4 rounded-2xl bg-gray-100 text-gray-500 font-bold text-sm border border-gray-200 cursor-not-allowed",
                     ),
                 ),
                 rx.el.button(
@@ -157,7 +157,7 @@ def time_controls() -> rx.Component:
                     class_name=rx.cond(
                         VideoState.is_input_valid & ~VideoState.is_processing,
                         "flex-1 py-4 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-bold text-sm shadow-xl shadow-violet-600/20 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer",
-                        "flex-1 py-4 rounded-2xl bg-gray-800 text-gray-500 font-bold text-sm cursor-not-allowed",
+                        "flex-1 py-4 rounded-2xl bg-gray-100 text-gray-500 font-bold text-sm border border-gray-200 cursor-not-allowed",
                     ),
                 ),
                 class_name="flex gap-4 w-full",
@@ -170,12 +170,12 @@ def time_controls() -> rx.Component:
                             class_name="h-full bg-violet-500 rounded-full transition-all duration-300 relative overflow-hidden",
                             style={"width": f"{VideoState.processing_progress}%"},
                         ),
-                        class_name="h-2 w-full bg-gray-800 rounded-full overflow-hidden mb-3",
+                        class_name="h-2 w-full bg-gray-200 rounded-full overflow-hidden mb-3",
                     ),
                     rx.el.div(
                         rx.el.span(
                             VideoState.processing_status,
-                            class_name="text-sm text-gray-300 font-medium",
+                            class_name="text-sm text-gray-700 font-medium",
                         ),
                         rx.el.span(
                             f"{VideoState.processing_progress}%",
@@ -197,5 +197,5 @@ def time_controls() -> rx.Component:
                 ),
             ),
         ),
-        class_name="w-full p-8 rounded-[2.5rem] bg-gray-950 border border-white/5 h-fit shadow-2xl",
+        class_name="w-full p-8 rounded-[2.5rem] bg-white border border-gray-200 h-fit shadow-sm",
     )
