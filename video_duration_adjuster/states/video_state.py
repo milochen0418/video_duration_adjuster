@@ -6,9 +6,38 @@ from typing import Optional
 import logging
 import subprocess
 from fractions import Fraction
+import shlex
+import sys
+import shutil
 
 
 class VideoState(rx.State):
+    COREML_MODEL_PRESETS: dict[str, dict[str, str]] = {
+        "custom": {
+            "label": "Custom",
+            "url": "",
+            "note": "Use your own Core ML VFI model URL or local path.",
+        },
+        "sepconv_128": {
+            "label": "SepConv 128 (Community, Experimental)",
+            "url": "https://raw.githubusercontent.com/carlo-/sepconv-ios/master/ios/SepConv-iOS/Models/SepConvPartialNetwork128.mlmodel",
+            "input0": "input_frames",
+            "input1": "input_frames",
+            "input_time": "time",
+            "output": "padded_i2",
+            "note": "Community model. Output compatibility is experimental in this project.",
+        },
+        "sepconv_256": {
+            "label": "SepConv 256 (Community, Experimental)",
+            "url": "https://raw.githubusercontent.com/carlo-/sepconv-ios/master/ios/SepConv-iOS/Models/SepConvPartialNetwork256.mlmodel",
+            "input0": "input_frames",
+            "input1": "input_frames",
+            "input_time": "time",
+            "output": "padded_i2",
+            "note": "Community model. Output compatibility is experimental in this project.",
+        },
+    }
+
     uploaded_file: str = ""
     file_name: str = ""
     is_uploaded: bool = False
@@ -34,7 +63,14 @@ class VideoState(rx.State):
     error_message: str = ""
     using_rubberband: bool = False
     using_optical_flow: bool = False
+    using_apple_native: bool = False
     source_fps: float = 0.0
+    coreml_model_source: str = "url"
+    coreml_model_preset: str = "custom"
+    coreml_model_url: str = ""
+    coreml_model_path: str = ""
+    coreml_compute_units: str = "CPU_AND_GPU"
+    require_gpu_backend: bool = True
 
     @staticmethod
     def _ffmpeg_has_filter(ffmpeg_bin: str, filter_name: str) -> bool:
@@ -116,6 +152,146 @@ class VideoState(rx.State):
             "formant=preserved:"
             "pitchq=quality"
         )
+
+    @staticmethod
+    def _is_macos() -> bool:
+        return sys.platform == "darwin"
+
+    @staticmethod
+    def _resolve_apple_native_vfi_template() -> str:
+        from pathlib import Path
+
+        env_template = os.getenv("APPLE_NATIVE_VFI_CMD", "").strip()
+        if env_template:
+            return env_template
+
+        if sys.platform != "darwin":
+            return ""
+
+        repo_root = Path(__file__).resolve().parents[2]
+        local_runner = repo_root / "scripts" / "apple_vfi_runner.py"
+        if local_runner.exists():
+            auto_template = (
+                f"{shlex.quote(sys.executable)} {shlex.quote(str(local_runner))} "
+                "--input {input} --output {output} --factor {factor} "
+                "--fps {fps} --preview-seconds {preview_seconds}"
+            )
+            os.environ["APPLE_NATIVE_VFI_CMD"] = auto_template
+            return auto_template
+
+        for command_name in ("apple-vfi-runner", "vtframeprocessor-vfi"):
+            command_path = shutil.which(command_name)
+            if command_path:
+                auto_template = (
+                    f"{shlex.quote(command_path)} "
+                    "--input {input} --output {output} --factor {factor} "
+                    "--fps {fps} --preview-seconds {preview_seconds}"
+                )
+                os.environ["APPLE_NATIVE_VFI_CMD"] = auto_template
+                return auto_template
+
+        return ""
+
+    async def _run_apple_native_interpolation(
+        self,
+        input_path: str,
+        output_path: str,
+        slow_factor: float,
+        target_fps: float,
+        is_preview: bool,
+    ):
+        import asyncio
+        from collections import deque
+
+        template = self._resolve_apple_native_vfi_template()
+        if not template:
+            raise RuntimeError(
+                "Apple native interpolation is required on macOS, but APPLE_NATIVE_VFI_CMD is not set."
+            )
+
+        command = template.format(
+            input=shlex.quote(input_path),
+            output=shlex.quote(output_path),
+            factor=f"{slow_factor:.6f}",
+            fps=f"{target_fps:.3f}",
+            preview_seconds="5" if is_preview else "0",
+        )
+
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        if process.stdout is None:
+            raise RuntimeError("Apple interpolation process output stream unavailable")
+
+        output_tail: deque[str] = deque(maxlen=80)
+
+        while True:
+            raw_line = await process.stdout.readline()
+            if not raw_line:
+                break
+
+            line = raw_line.decode(errors="replace").strip()
+            if not line:
+                continue
+
+            output_tail.append(line)
+
+            if line.startswith("APPLE_VFI_PROGRESS="):
+                try:
+                    progress = int(line.split("=", 1)[1])
+                    progress = max(1, min(70, progress))
+                    if progress > self.processing_progress:
+                        self.processing_progress = progress
+                        yield
+                except ValueError:
+                    pass
+            elif line.startswith("APPLE_VFI_BACKEND="):
+                backend_name = line.split("=", 1)[1].strip()
+                if backend_name == "swift-built-in":
+                    self.processing_status = (
+                        "Using built-in Swift Apple backend (non-AI GPU interpolation)."
+                    )
+                elif backend_name == "vtframeprocessor":
+                    self.processing_status = (
+                        "Using Apple GPU-capable frame interpolation backend (vtframeprocessor)."
+                    )
+                elif backend_name:
+                    self.processing_status = (
+                        f"Using Apple frame interpolation backend: {backend_name}."
+                    )
+                yield
+            elif line.startswith("APPLE_VFI_WARNING="):
+                warning_text = line.split("=", 1)[1].strip()
+                if warning_text:
+                    self.processing_status = warning_text
+                    yield
+            elif line.startswith("APPLE_VFI_INFO="):
+                info_text = line.split("=", 1)[1].strip()
+                if info_text:
+                    self.processing_status = info_text
+                    yield
+            elif line.startswith("APPLE_VFI_ERROR="):
+                error_text = line.split("=", 1)[1].strip()
+                if error_text:
+                    raise RuntimeError(error_text)
+
+        await process.wait()
+
+        if process.returncode != 0:
+            tail_text = "\n".join(output_tail)
+            raise RuntimeError(
+                f"Apple native interpolation command failed with exit code {process.returncode}. Details: {tail_text}"
+            )
+
+        if not os.path.exists(output_path):
+            raise RuntimeError("Apple native interpolation did not produce output video.")
+
+        if self.processing_progress < 70:
+            self.processing_progress = 70
+            yield
 
     @rx.var
     def calculated_target_total(self) -> float:
@@ -201,6 +377,102 @@ class VideoState(rx.State):
     @rx.event
     def update_target_total_seconds(self, value: str | int | float | None):
         self.target_total_seconds = self._normalize_numeric_input(value)
+
+    @rx.event
+    def set_coreml_model_source(self, source: str):
+        normalized = (source or "").strip().lower()
+        if normalized in {"url", "path"}:
+            self.coreml_model_source = normalized
+
+    @rx.event
+    def update_coreml_model_url(self, value: str | int | float | None):
+        self.coreml_model_url = self._normalize_numeric_input(value).strip()
+        self.coreml_model_preset = "custom"
+
+    @rx.event
+    def update_coreml_model_path(self, value: str | int | float | None):
+        self.coreml_model_path = self._normalize_numeric_input(value).strip()
+
+    @rx.event
+    def set_coreml_model_preset(self, preset: str):
+        selected = (preset or "").strip()
+        if selected not in self.COREML_MODEL_PRESETS:
+            selected = "custom"
+        self.coreml_model_preset = selected
+        preset_config = self.COREML_MODEL_PRESETS.get(selected, {})
+        preset_url = preset_config.get("url", "").strip()
+        if preset_url:
+            self.coreml_model_source = "url"
+            self.coreml_model_url = preset_url
+
+    @rx.var
+    def coreml_preset_note(self) -> str:
+        config = self.COREML_MODEL_PRESETS.get(self.coreml_model_preset, {})
+        return config.get("note", "")
+
+    @rx.event
+    def set_coreml_compute_units(self, value: str):
+        allowed = {"ALL", "CPU_ONLY", "CPU_AND_GPU", "CPU_AND_NE"}
+        normalized = (value or "").strip().upper()
+        if normalized in allowed:
+            self.coreml_compute_units = normalized
+
+    @rx.event
+    def set_require_gpu_backend(self, required: bool):
+        self.require_gpu_backend = bool(required)
+
+    def _apply_runtime_backend_env(self):
+        has_url = bool((self.coreml_model_url or "").strip())
+        has_path = bool((self.coreml_model_path or "").strip())
+
+        if self.require_gpu_backend and not has_url and not has_path:
+            fallback_preset = "sepconv_128"
+            fallback_config = self.COREML_MODEL_PRESETS.get(fallback_preset, {})
+            fallback_url = fallback_config.get("url", "").strip()
+            if fallback_url:
+                self.coreml_model_source = "url"
+                self.coreml_model_preset = fallback_preset
+                self.coreml_model_url = fallback_url
+                has_url = True
+
+        if self.coreml_model_source == "url":
+            if self.coreml_model_url:
+                os.environ["APPLE_COREML_MODEL_URL"] = self.coreml_model_url
+            else:
+                os.environ.pop("APPLE_COREML_MODEL_URL", None)
+            os.environ.pop("APPLE_COREML_MODEL_PATH", None)
+        elif self.coreml_model_source == "path":
+            if self.coreml_model_path:
+                os.environ["APPLE_COREML_MODEL_PATH"] = self.coreml_model_path
+            else:
+                os.environ.pop("APPLE_COREML_MODEL_PATH", None)
+            os.environ.pop("APPLE_COREML_MODEL_URL", None)
+
+        os.environ["APPLE_COREML_COMPUTE_UNITS"] = self.coreml_compute_units
+        os.environ["APPLE_VFI_REQUIRE_GPU"] = "1" if self.require_gpu_backend else "0"
+
+        preset_config = self.COREML_MODEL_PRESETS.get(self.coreml_model_preset, {})
+        input0 = preset_config.get("input0", "").strip()
+        input1 = preset_config.get("input1", "").strip()
+        input_time = preset_config.get("input_time", "").strip()
+        output = preset_config.get("output", "").strip()
+
+        if input0:
+            os.environ["APPLE_COREML_INPUT0"] = input0
+        else:
+            os.environ.pop("APPLE_COREML_INPUT0", None)
+        if input1:
+            os.environ["APPLE_COREML_INPUT1"] = input1
+        else:
+            os.environ.pop("APPLE_COREML_INPUT1", None)
+        if input_time:
+            os.environ["APPLE_COREML_INPUT_TIME"] = input_time
+        else:
+            os.environ.pop("APPLE_COREML_INPUT_TIME", None)
+        if output:
+            os.environ["APPLE_COREML_OUTPUT"] = output
+        else:
+            os.environ.pop("APPLE_COREML_OUTPUT", None)
 
     @rx.event
     async def handle_upload(self, files: list[rx.UploadFile]):
@@ -296,6 +568,7 @@ class VideoState(rx.State):
         self.processing_progress = 0
         yield
         try:
+            self._apply_runtime_backend_env()
             upload_dir = rx.get_upload_dir()
             input_path = upload_dir / self.uploaded_file
             if not input_path.exists():
@@ -317,7 +590,66 @@ class VideoState(rx.State):
                 output_path.unlink()
             video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
             self.using_optical_flow = False
+            self.using_apple_native = False
+            video_input_path = input_path
+            audio_input_path = input_path
+            apple_native_template = self._resolve_apple_native_vfi_template()
+
             if (
+                self._is_macos()
+                and video_speed_factor > 1.0
+                and self.source_fps > 0
+                and apple_native_template
+            ):
+                apple_output_filename = f"apple_native_{output_filename}"
+                apple_output_path = upload_dir / apple_output_filename
+                if apple_output_path.exists():
+                    apple_output_path.unlink()
+
+                self.processing_status = (
+                    "Running Apple native frame interpolation... This may take a while."
+                )
+                self.using_apple_native = True
+                yield
+                try:
+                    async for _ in self._run_apple_native_interpolation(
+                        input_path=str(input_path),
+                        output_path=str(apple_output_path),
+                        slow_factor=video_speed_factor,
+                        target_fps=min(max(self.source_fps, 1.0), 120.0),
+                        is_preview=is_preview,
+                    ):
+                        yield
+
+                    video_input_path = apple_output_path
+                    video_filter = "[0:v]setpts=PTS[v]"
+                except Exception as apple_error:
+                    logging.warning(
+                        "Apple native interpolation failed, fallback to FFmpeg optical flow: %s",
+                        apple_error,
+                    )
+                    self.using_apple_native = False
+                    error_text = str(apple_error)
+                    if "APPLE_VFI_REQUIRE_GPU" in error_text:
+                        self.processing_status = (
+                            "GPU strict mode is enabled, but no GPU-capable model/backend is ready. "
+                            "Set Model Preset or Model URL/Path in 'Apple AI/Metal Model', "
+                            "or turn off 'Require GPU-capable backend'. Falling back to FFmpeg optical-flow interpolation."
+                        )
+                    else:
+                        self.processing_status = (
+                            f"Apple native interpolation failed ({apple_error}). Falling back to FFmpeg optical-flow interpolation."
+                        )
+                    yield
+            elif self._is_macos() and video_speed_factor > 1.0 and self.source_fps > 0:
+                self.processing_status = (
+                    "Apple native interpolation command not found. Falling back to FFmpeg optical-flow interpolation."
+                )
+                yield
+
+            if self.using_apple_native:
+                pass
+            elif (
                 video_speed_factor > 1.0
                 and ffmpeg_has_minterpolate
                 and self.source_fps > 0
@@ -340,25 +672,40 @@ class VideoState(rx.State):
                     self.using_rubberband = True
                 else:
                     audio_filter = self._build_atempo_chain(tempo)
-                filter_complex = f"{video_filter};[0:a]{audio_filter}[a]"
+                audio_input_index = 1 if self.using_apple_native else 0
+                filter_complex = (
+                    f"{video_filter};[{audio_input_index}:a]{audio_filter}[a]"
+                )
             cmd = [
                 ffmpeg_bin,
                 "-progress",
                 "pipe:1",
                 "-nostats",
                 "-i",
-                str(input_path),
+                str(video_input_path),
+            ]
+            if self.using_apple_native and has_audio:
+                cmd.extend(["-i", str(audio_input_path)])
+            cmd.extend([
                 "-filter_complex",
                 filter_complex,
                 "-map",
                 "[v]",
                 "-y",
-            ]
+            ])
             if has_audio:
                 cmd.extend(["-map", "[a]"])
             if is_preview:
                 cmd.extend(["-t", "5"])
-                if self.using_optical_flow and has_audio and self.using_rubberband:
+                if self.using_apple_native and has_audio and self.using_rubberband:
+                    self.processing_status = "Generating preview with Apple native frame interpolation and Rubber Band audio optimization..."
+                elif self.using_apple_native and has_audio:
+                    self.processing_status = "Generating preview with Apple native frame interpolation and standard audio tempo processing..."
+                elif self.using_apple_native:
+                    self.processing_status = (
+                        "Generating preview with Apple native frame interpolation..."
+                    )
+                elif self.using_optical_flow and has_audio and self.using_rubberband:
                     self.processing_status = "Generating preview with optical-flow frame interpolation and Rubber Band audio optimization..."
                 elif self.using_optical_flow and has_audio:
                     self.processing_status = "Generating preview with optical-flow frame interpolation and standard audio tempo processing..."
@@ -373,7 +720,19 @@ class VideoState(rx.State):
                 else:
                     self.processing_status = "Generating preview..."
             else:
-                if self.using_optical_flow and has_audio and self.using_rubberband:
+                if self.using_apple_native and has_audio and self.using_rubberband:
+                    self.processing_status = (
+                        "Processing full video with Apple native frame interpolation and Rubber Band audio optimization... This may take a while."
+                    )
+                elif self.using_apple_native and has_audio:
+                    self.processing_status = (
+                        "Processing full video with Apple native frame interpolation and standard audio tempo processing... This may take a while."
+                    )
+                elif self.using_apple_native:
+                    self.processing_status = (
+                        "Processing full video with Apple native frame interpolation... This may take a while."
+                    )
+                elif self.using_optical_flow and has_audio and self.using_rubberband:
                     self.processing_status = (
                         "Processing full video with optical-flow frame interpolation and Rubber Band audio optimization... This may take a while."
                     )
@@ -501,6 +860,7 @@ class VideoState(rx.State):
         self.is_processed = False
         self.error_message = ""
         self.using_optical_flow = False
+        self.using_apple_native = False
         self.target_hours = "0"
         self.target_minutes = "0"
         self.target_seconds = "0"

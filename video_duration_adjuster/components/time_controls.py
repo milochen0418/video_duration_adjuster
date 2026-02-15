@@ -18,6 +18,22 @@ def input_field(
     )
 
 
+def text_input_field(
+    label: str, value_var: rx.Var, on_change: rx.event.EventType, placeholder: str
+) -> rx.Component:
+    return rx.el.div(
+        rx.el.label(label, class_name="text-xs text-gray-600 font-bold mb-1 ml-1"),
+        rx.el.input(
+            type="text",
+            placeholder=placeholder,
+            default_value=value_var,
+            on_change=on_change.debounce(300),
+            class_name="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-gray-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all",
+        ),
+        class_name="flex flex-col flex-1",
+    )
+
+
 def speed_indicator() -> rx.Component:
     return rx.el.div(
         rx.el.div(
@@ -115,6 +131,118 @@ def time_controls() -> rx.Component:
             ),
         ),
         rx.el.div(
+            rx.el.div(
+                rx.el.h4("Apple AI/Metal Model", class_name="text-base font-bold text-gray-900 mb-3"),
+                rx.el.div(
+                    rx.el.label(
+                        "Model Preset",
+                        class_name="text-xs text-gray-600 font-bold mb-1 ml-1",
+                    ),
+                    rx.el.select(
+                        rx.el.option("Custom", value="custom"),
+                        rx.el.option(
+                            "SepConv 128 (Community, Experimental)",
+                            value="sepconv_128",
+                        ),
+                        rx.el.option(
+                            "SepConv 256 (Community, Experimental)",
+                            value="sepconv_256",
+                        ),
+                        value=VideoState.coreml_model_preset,
+                        on_change=VideoState.set_coreml_model_preset,
+                        class_name="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-gray-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all",
+                    ),
+                    class_name="mb-4",
+                ),
+                rx.el.div(
+                    rx.el.button(
+                        "Model URL",
+                        on_click=lambda: VideoState.set_coreml_model_source("url"),
+                        class_name=rx.cond(
+                            VideoState.coreml_model_source == "url",
+                            "px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold transition-all",
+                            "px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-bold hover:bg-gray-200 transition-all",
+                        ),
+                    ),
+                    rx.el.button(
+                        "Local Path",
+                        on_click=lambda: VideoState.set_coreml_model_source("path"),
+                        class_name=rx.cond(
+                            VideoState.coreml_model_source == "path",
+                            "px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold transition-all",
+                            "px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-bold hover:bg-gray-200 transition-all",
+                        ),
+                    ),
+                    class_name="flex gap-2 p-1 bg-gray-50 rounded-xl border border-gray-200 mb-4",
+                ),
+                rx.cond(
+                    VideoState.coreml_model_source == "url",
+                    text_input_field(
+                        "APPLE_COREML_MODEL_URL",
+                        VideoState.coreml_model_url,
+                        VideoState.update_coreml_model_url,
+                        "https://.../model.mlpackage or .zip",
+                    ),
+                    text_input_field(
+                        "APPLE_COREML_MODEL_PATH",
+                        VideoState.coreml_model_path,
+                        VideoState.update_coreml_model_path,
+                        "/absolute/path/to/model.mlmodelc",
+                    ),
+                ),
+                rx.el.div(
+                    rx.el.label(
+                        "Compute Units",
+                        class_name="text-xs text-gray-600 font-bold mb-1 ml-1 mt-4",
+                    ),
+                    rx.el.select(
+                        rx.el.option("CPU_AND_GPU", value="CPU_AND_GPU"),
+                        rx.el.option("ALL", value="ALL"),
+                        rx.el.option("CPU_AND_NE", value="CPU_AND_NE"),
+                        rx.el.option("CPU_ONLY", value="CPU_ONLY"),
+                        value=VideoState.coreml_compute_units,
+                        on_change=VideoState.set_coreml_compute_units,
+                        class_name="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-gray-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none transition-all",
+                    ),
+                    class_name="mb-4",
+                ),
+                rx.el.div(
+                    rx.el.p(
+                        "Require GPU-capable backend",
+                        class_name="text-xs text-gray-600 font-bold mb-2 ml-1",
+                    ),
+                    rx.el.div(
+                        rx.el.button(
+                            "On",
+                            on_click=lambda: VideoState.set_require_gpu_backend(True),
+                            class_name=rx.cond(
+                                VideoState.require_gpu_backend,
+                                "px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold transition-all",
+                                "px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-bold hover:bg-gray-200 transition-all",
+                            ),
+                        ),
+                        rx.el.button(
+                            "Off",
+                            on_click=lambda: VideoState.set_require_gpu_backend(False),
+                            class_name=rx.cond(
+                                ~VideoState.require_gpu_backend,
+                                "px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-bold transition-all",
+                                "px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs font-bold hover:bg-gray-200 transition-all",
+                            ),
+                        ),
+                        class_name="flex gap-2 p-1 bg-gray-50 rounded-xl border border-gray-200",
+                    ),
+                ),
+                rx.el.p(
+                    VideoState.coreml_preset_note,
+                    class_name="text-xs text-gray-500 mt-3",
+                ),
+                rx.el.p(
+                    "Tip: Use Model URL to auto-download once, or Local Path for an existing .mlmodelc.",
+                    class_name="text-xs text-gray-500 mt-3",
+                ),
+                class_name="p-6 rounded-3xl border border-gray-200 bg-gray-50/40 mb-8",
+            ),
             rx.el.div(
                 rx.icon("info", class_name="h-5 w-5 text-violet-400 mr-3"),
                 rx.el.p(
