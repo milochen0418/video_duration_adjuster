@@ -5,6 +5,7 @@ import os
 from typing import Optional
 import logging
 import subprocess
+from fractions import Fraction
 
 
 class VideoState(rx.State):
@@ -32,9 +33,11 @@ class VideoState(rx.State):
     is_processed: bool = False
     error_message: str = ""
     using_rubberband: bool = False
+    using_optical_flow: bool = False
+    source_fps: float = 0.0
 
     @staticmethod
-    def _ffmpeg_has_rubberband(ffmpeg_bin: str) -> bool:
+    def _ffmpeg_has_filter(ffmpeg_bin: str, filter_name: str) -> bool:
         try:
             result = subprocess.run(
                 [ffmpeg_bin, "-hide_banner", "-filters"],
@@ -43,9 +46,29 @@ class VideoState(rx.State):
                 check=False,
             )
             combined = f"{result.stdout}\n{result.stderr}".lower()
-            return "rubberband" in combined
+            return filter_name.lower() in combined
         except Exception:
             return False
+
+    @classmethod
+    def _ffmpeg_has_rubberband(cls, ffmpeg_bin: str) -> bool:
+        return cls._ffmpeg_has_filter(ffmpeg_bin, "rubberband")
+
+    @classmethod
+    def _ffmpeg_has_minterpolate(cls, ffmpeg_bin: str) -> bool:
+        return cls._ffmpeg_has_filter(ffmpeg_bin, "minterpolate")
+
+    @staticmethod
+    def _parse_fps(raw_fps: str | None) -> float:
+        if not raw_fps:
+            return 0.0
+        try:
+            fps = float(Fraction(raw_fps))
+            if fps <= 0:
+                return 0.0
+            return fps
+        except Exception:
+            return 0.0
 
     @classmethod
     def _resolve_ffmpeg_binary(cls) -> tuple[str, bool]:
@@ -234,6 +257,10 @@ class VideoState(rx.State):
                 )
                 self.width = int(video_stream.get("width", 0))
                 self.height = int(video_stream.get("height", 0))
+                self.source_fps = self._parse_fps(
+                    video_stream.get("avg_frame_rate")
+                    or video_stream.get("r_frame_rate")
+                )
                 self.has_audio = any(
                     s.get("codec_type") == "audio"
                     for s in metadata.get("streams", [])
@@ -246,6 +273,7 @@ class VideoState(rx.State):
                 self.duration_seconds = 0.0
                 self.width = 0
                 self.height = 0
+                self.source_fps = 0.0
                 self.has_audio = False
                 self.error_message = "Could not read video metadata. Please verify ffprobe/ffmpeg setup."
             hours = int(self.duration_seconds // 3600)
@@ -276,6 +304,7 @@ class VideoState(rx.State):
             if ratio <= 0:
                 raise ValueError("Invalid speed ratio")
             ffmpeg_bin, ffmpeg_has_rubberband = self._resolve_ffmpeg_binary()
+            ffmpeg_has_minterpolate = self._ffmpeg_has_minterpolate(ffmpeg_bin)
             video_speed_factor = 1.0 / ratio
             tempo = ratio
             output_filename = (
@@ -287,6 +316,21 @@ class VideoState(rx.State):
             if output_path.exists():
                 output_path.unlink()
             video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
+            self.using_optical_flow = False
+            if (
+                video_speed_factor > 1.0
+                and ffmpeg_has_minterpolate
+                and self.source_fps > 0
+            ):
+                target_fps = min(max(self.source_fps, 1.0), 120.0)
+                video_filter = (
+                    f"[0:v]setpts=PTS*{video_speed_factor},"
+                    f"minterpolate=fps={target_fps:.3f}:"
+                    "mi_mode=mci:mc_mode=aobmc:vsbmc=1[v]"
+                )
+                self.using_optical_flow = True
+            else:
+                video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
             has_audio = self.has_audio
             filter_complex = video_filter
             self.using_rubberband = False
@@ -314,14 +358,34 @@ class VideoState(rx.State):
                 cmd.extend(["-map", "[a]"])
             if is_preview:
                 cmd.extend(["-t", "5"])
-                if has_audio and self.using_rubberband:
+                if self.using_optical_flow and has_audio and self.using_rubberband:
+                    self.processing_status = "Generating preview with optical-flow frame interpolation and Rubber Band audio optimization..."
+                elif self.using_optical_flow and has_audio:
+                    self.processing_status = "Generating preview with optical-flow frame interpolation and standard audio tempo processing..."
+                elif self.using_optical_flow:
+                    self.processing_status = (
+                        "Generating preview with optical-flow frame interpolation..."
+                    )
+                elif has_audio and self.using_rubberband:
                     self.processing_status = "Generating preview with Rubber Band audio optimization..."
                 elif has_audio:
                     self.processing_status = "Generating preview with standard audio tempo processing..."
                 else:
                     self.processing_status = "Generating preview..."
             else:
-                if has_audio and self.using_rubberband:
+                if self.using_optical_flow and has_audio and self.using_rubberband:
+                    self.processing_status = (
+                        "Processing full video with optical-flow frame interpolation and Rubber Band audio optimization... This may take a while."
+                    )
+                elif self.using_optical_flow and has_audio:
+                    self.processing_status = (
+                        "Processing full video with optical-flow frame interpolation and standard audio tempo processing... This may take a while."
+                    )
+                elif self.using_optical_flow:
+                    self.processing_status = (
+                        "Processing full video with optical-flow frame interpolation... This may take a while."
+                    )
+                elif has_audio and self.using_rubberband:
                     self.processing_status = (
                         "Processing full video with Rubber Band audio optimization... This may take a while."
                     )
@@ -427,6 +491,7 @@ class VideoState(rx.State):
         self.height = 0
         self.file_size_mb = 0.0
         self.has_audio = False
+        self.source_fps = 0.0
         self.is_processing = False
         self.processing_progress = 0
         self.processing_status = ""
@@ -435,6 +500,7 @@ class VideoState(rx.State):
         self.processed_file = ""
         self.is_processed = False
         self.error_message = ""
+        self.using_optical_flow = False
         self.target_hours = "0"
         self.target_minutes = "0"
         self.target_seconds = "0"
