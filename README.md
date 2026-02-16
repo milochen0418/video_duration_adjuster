@@ -77,5 +77,7 @@ This will remove existing Poetry virtual environments and Reflex artifacts, recr
 
 This project uses **CPU-based Optical Flow Interpolation** to generate intermediate frames when adjusting video duration.
 
-An alternative approach leveraging **Apple GPU (Metal / Core ML) deep learning** for frame interpolation was explored in [PR #1](https://github.com/milochen0418/video_duration_adjuster/pull/1). After experimentation, the GPU-accelerated deep learning method did not outperform the current CPU-based optical flow approach in terms of output quality. Therefore, the Optical Flow Interpolation method remains the default and recommended approach.
+An alternative approach using **RIFE v4.22** with **Apple Silicon M4 GPU acceleration** (Metal / Core ML) for deep-learning-based frame interpolation was explored in [PR #1](https://github.com/milochen0418/video_duration_adjuster/pull/1). After experimentation, the GPU-accelerated RIFE deep learning method on Apple Silicon did not outperform the current CPU-based **Optical Flow Interpolation** approach in terms of output quality. Therefore, Optical Flow Interpolation remains the default and recommended approach.
+
+**Keywords:** RIFE v4.22, Apple Silicon, M4, GPU acceleration, Optical Flow Interpolation
 
