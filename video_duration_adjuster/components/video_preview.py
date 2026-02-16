@@ -54,7 +54,7 @@ def result_preview(title: str, file_path: str, is_ready: bool) -> rx.Component:
                     class_name="w-full py-3 rounded-xl bg-gray-900 text-white text-sm font-bold border border-gray-900 hover:bg-gray-800 transition-all flex items-center justify-center",
                 ),
                 href=rx.get_upload_url(file_path),
-                download=file_path,
+                target="_blank",
                 class_name="w-full",
             ),
             class_name="animate-in fade-in zoom-in duration-500 p-6 bg-white rounded-2xl border border-gray-200",

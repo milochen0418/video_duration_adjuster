@@ -14,4 +14,4 @@ else
 fi
 
 echo "Starting Reflex app with args: $@"
-poetry run reflex run "$@"
+poetry run reflex run "$@" 2>&1 | grep -v "ASGI transport error"
