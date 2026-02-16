@@ -2,7 +2,77 @@
 
 > Important: Before working on this project, read [AGENTS.md](AGENTS.md) for required workflows and tooling expectations.
 
+## Usage Guide
 
+### Step 0 — Landing Page
+
+![Landing Page](docs/images/00-landing-page.png)
+
+When you first open the app at `http://localhost:3000`, you are greeted with a clean landing page. The headline reads **"Manipulate Time in Seconds."** and a drag-and-drop upload zone is displayed in the center. You can either drag a video file onto the zone or click it to browse your files. Supported formats are **MP4**, **MOV**, and **WEBM**.
+
+---
+
+### Step 1 — Uploaded Video with Information
+
+![Uploaded Video with Info](docs/images/01-uploaded-video-with-info.png)
+
+After uploading a video, the app automatically analyzes the file and displays:
+
+- **Original Video** — an embedded player so you can review the source footage.
+- **Video Information** — file name, duration, resolution, and file size are shown.
+
+This gives you a clear picture of the input before you make any changes.
+
+---
+
+### Step 2 — Set the Output Duration
+
+![Set Output Duration](docs/images/02-set-output-duration.png)
+
+In **Step 3** of the UI panel, enter your desired target duration. You can toggle between two input modes:
+
+- **Time Format** — specify hours, minutes, and seconds separately.
+- **Total Seconds** — enter a single number representing the total seconds.
+
+A **Playback Speed** indicator updates in real time, showing you the resulting speed ratio (e.g., *1.5× faster*). If the speed change is extreme, a warning message appears to let you know quality may be affected.
+
+Below the controls you will find two action buttons:
+
+| Button | Description |
+|--------|-------------|
+| **Generate Preview (5s)** | Creates a short 5-second preview clip so you can check the result before committing to the full conversion. |
+| **Process Full Video** | Processes the entire video at the specified target duration. |
+
+---
+
+### Step 3 — 5-Second Preview (Optional)
+
+![5s Preview](docs/images/03-5s-preview-optional.png)
+
+If you click **Generate Preview (5s)**, the app renders a short clip with the new speed applied. A video player appears under **Step 4 — Preview Result**, allowing you to watch and download the preview. This is optional — you can skip directly to processing the full video if you prefer.
+
+---
+
+### Step 4 — Processing & Output Result
+
+![Processing Output Result](docs/images/04-processing-output-result.png)
+
+When you click **Process Full Video**, a progress bar and status text appear showing the current stage (e.g., *Adjusting audio speed…*) and completion percentage. The app uses high-quality audio time-stretching (rubberband) to preserve natural pitch, and optical-flow interpolation for smooth video frame adjustment.
+
+---
+
+### Step 5 — Final Processed Video
+
+![Final Processed Video](docs/images/05-final-processed-video.png)
+
+Once processing is complete, **Step 5 — Final Output** appears with:
+
+- An embedded video player for the processed result.
+- A **Download Video** button to save the output file to your machine.
+
+You can also click **Upload Different Video** at the bottom to start over with a new file.
+
+---
 
 ## Getting Started
 
