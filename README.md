@@ -73,3 +73,9 @@ To fully clean the environment, reinstall all dependencies, and start the app in
 
 This will remove existing Poetry virtual environments and Reflex artifacts, recreate the environment from scratch, and automatically launch the app afterwards.
 
+## Frame Interpolation Approach
+
+This project uses **CPU-based Optical Flow Interpolation** to generate intermediate frames when adjusting video duration.
+
+An alternative approach leveraging **Apple GPU (Metal / Core ML) deep learning** for frame interpolation was explored in [PR #1](https://github.com/milochen0418/video_duration_adjuster/pull/1). After experimentation, the GPU-accelerated deep learning method did not outperform the current CPU-based optical flow approach in terms of output quality. Therefore, the Optical Flow Interpolation method remains the default and recommended approach.
+
