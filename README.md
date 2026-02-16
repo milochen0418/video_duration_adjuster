@@ -74,6 +74,12 @@ You can also click **Upload Different Video** at the bottom to start over with a
 
 ---
 
+## Documentation
+
+This project includes a **Software Design Document (SDD)** that covers the system architecture, component design, data flow, and technical decisions:
+
+- [Video Duration Adjuster (TimeShift) - Software Design Document (SDD).pdf](docs/Video%20Duration%20Adjuster%20(TimeShift)%20-%20Software%20Design%20Document%20(SDD).pdf)
+
 ## Getting Started
 
 > Before making changes, read the project guidelines in [AGENTS.md](AGENTS.md).
