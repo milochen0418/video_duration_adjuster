@@ -2,8 +2,8 @@ import reflex as rx
 import random
 import string
 import os
+import sys
 from typing import Optional
-import logging
 import subprocess
 from fractions import Fraction
 
@@ -34,6 +34,7 @@ class VideoState(rx.State):
     error_message: str = ""
     using_rubberband: bool = False
     using_optical_flow: bool = False
+    using_rife: bool = False
     source_fps: float = 0.0
 
     @staticmethod
@@ -101,6 +102,26 @@ class VideoState(rx.State):
         remaining = max(0.5, min(2.0, remaining))
         factors.append(remaining)
         return ",".join(f"atempo={factor:.6f}" for factor in factors)
+
+    @classmethod
+    def _is_rife_available(cls) -> bool:
+        """Check if RIFE AI frame interpolation is set up and ready."""
+        # __file__ = .../video_duration_adjuster/video_duration_adjuster/states/video_state.py
+        # We need to go up 3 levels to reach the project root (where scripts/ lives)
+        scripts_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "scripts",
+        )
+        runner = os.path.join(scripts_dir, "apple_vfi_runner.py")
+        rife_dir = os.path.join(scripts_dir, "Practical-RIFE")
+        flownet = os.path.join(rife_dir, "train_log", "flownet.pkl")
+        runner_ok = os.path.exists(runner)
+        flownet_ok = os.path.exists(flownet)
+        print(f"[RIFE-CHECK] __file__={__file__}", flush=True)
+        print(f"[RIFE-CHECK] scripts_dir={scripts_dir}", flush=True)
+        print(f"[RIFE-CHECK] runner={runner}  exists={runner_ok}", flush=True)
+        print(f"[RIFE-CHECK] flownet={flownet}  exists={flownet_ok}", flush=True)
+        return runner_ok and flownet_ok
 
     @staticmethod
     def _build_rubberband_filter(tempo: float) -> str:
@@ -268,8 +289,8 @@ class VideoState(rx.State):
                 if self.duration_seconds <= 0:
                     raise RuntimeError("Unable to parse valid duration from ffprobe output")
             except Exception as e:
-                logging.exception("Unexpected error")
-                logging.warning(f"FFprobe failed, metadata set to safe defaults: {e}")
+                import traceback; traceback.print_exc()
+                print(f"[WARN] FFprobe failed, metadata set to safe defaults: {e}", flush=True)
                 self.duration_seconds = 0.0
                 self.width = 0
                 self.height = 0
@@ -282,9 +303,270 @@ class VideoState(rx.State):
             self.duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             self.is_uploaded = True
         except Exception as e:
-            logging.exception(f"Error saving video: {e}")
+            import traceback; traceback.print_exc()
+            print(f"[ERROR] Error saving video: {e}", flush=True)
             yield rx.toast("Failed to process video file.", variant="error")
         self.is_uploading = False
+
+    async def _process_with_rife(
+        self, input_path, output_path, video_speed_factor, is_preview
+    ):
+        """Process video using RIFE AI frame interpolation on Apple MPS GPU.
+
+        Pipeline:
+        1. Extract frames from input video using ffmpeg
+        2. Run RIFE model to generate interpolated frames (via subprocess)
+        3. Assemble interpolated frames into output video
+        4. Process audio separately (pitch-preserved)
+        5. Merge video + audio tracks
+        """
+        import asyncio
+        import shutil
+        import tempfile
+
+        ffmpeg_bin, ffmpeg_has_rubberband = self._resolve_ffmpeg_binary()
+        tempo = self.speed_ratio  # original_duration / target_duration
+
+        # Calculate RIFE multiplier (clamped to 2..8)
+        multi = max(2, min(8, round(video_speed_factor)))
+
+        print(f"[RIFE] Starting RIFE AI pipeline", flush=True)
+        print(f"[RIFE] video_speed_factor={video_speed_factor:.3f}, multi={multi}x", flush=True)
+        print(f"[RIFE] ffmpeg binary: {ffmpeg_bin}", flush=True)
+        print(f"[RIFE] rubberband available: {ffmpeg_has_rubberband}", flush=True)
+
+        tmpdir = tempfile.mkdtemp(prefix="rife_vfi_")
+        try:
+            input_frames_dir = os.path.join(tmpdir, "input_frames")
+            output_frames_dir = os.path.join(tmpdir, "output_frames")
+            os.makedirs(input_frames_dir)
+            os.makedirs(output_frames_dir)
+
+            # ── Step 1: Extract frames ──
+            self.processing_status = (
+                "Extracting video frames for AI processing..."
+            )
+            self.processing_progress = 3
+            yield
+
+            extract_cmd = [ffmpeg_bin, "-i", str(input_path)]
+            if is_preview:
+                extract_cmd.extend(["-t", "5"])
+            extract_cmd.extend(
+                ["-qscale:v", "2", "-y",
+                 os.path.join(input_frames_dir, "%07d.png")]
+            )
+
+            proc = await asyncio.create_subprocess_exec(
+                *extract_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError("Failed to extract frames from video")
+
+            input_frame_list = [
+                f for f in os.listdir(input_frames_dir) if f.endswith(".png")
+            ]
+            if not input_frame_list:
+                raise RuntimeError("No frames extracted from video")
+
+            input_frame_count = len(input_frame_list)
+            print(f"[RIFE] Step 1 done: extracted {input_frame_count} frames", flush=True)
+
+            # ── Step 2: RIFE interpolation on MPS GPU ──
+            scale = 1.0
+            if self.width > 1920 or self.height > 1080:
+                scale = 0.5  # Half resolution for HD+ content
+                print(f"[RIFE] Using scale=0.5 for HD+ content ({self.width}x{self.height})", flush=True)
+
+            self.processing_status = (
+                f"Running RIFE AI frame interpolation on Apple Metal GPU "
+                f"({multi}x, {input_frame_count} frames)..."
+            )
+            self.processing_progress = 8
+            yield
+
+            scripts_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "scripts",
+            )
+            runner = os.path.join(scripts_dir, "apple_vfi_runner.py")
+
+            rife_cmd = [
+                sys.executable,
+                runner,
+                "--input_dir", input_frames_dir,
+                "--output_dir", output_frames_dir,
+                "--multi", str(multi),
+                "--scale", str(scale),
+            ]
+            print(f"[RIFE] Step 2: launching subprocess: {' '.join(rife_cmd)}", flush=True)
+
+            rife_proc = await asyncio.create_subprocess_exec(
+                *rife_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            total_output_frames = 0
+
+            if rife_proc.stdout is not None:
+                while True:
+                    raw_line = await rife_proc.stdout.readline()
+                    if not raw_line:
+                        break
+                    line = raw_line.decode(errors="replace").strip()
+
+                    if line.startswith("PROGRESS:"):
+                        try:
+                            rife_pct = int(line.split(":", 1)[1])
+                            # Map RIFE 0-100 → overall 8-72
+                            overall = 8 + int(rife_pct * 0.64)
+                            if overall > self.processing_progress:
+                                self.processing_progress = min(72, overall)
+                                yield
+                        except ValueError:
+                            pass
+                    elif line.startswith("TOTAL_FRAMES:"):
+                        try:
+                            total_output_frames = int(line.split(":", 1)[1])
+                        except ValueError:
+                            pass
+
+            await rife_proc.wait()
+            if rife_proc.returncode != 0:
+                raise RuntimeError(
+                    "RIFE frame interpolation subprocess failed "
+                    f"(exit code {rife_proc.returncode})"
+                )
+
+            if total_output_frames == 0:
+                total_output_frames = len(
+                    [f for f in os.listdir(output_frames_dir)
+                     if f.endswith(".png")]
+                )
+            if total_output_frames == 0:
+                raise RuntimeError("No interpolated frames were generated")
+
+            print(f"[RIFE] Step 2 done: generated {total_output_frames} interpolated frames", flush=True)
+
+            # ── Step 3: Assemble video from interpolated frames ──
+            self.processing_status = (
+                "Assembling AI-interpolated frames into video..."
+            )
+            self.processing_progress = 75
+            yield
+
+            # Calculate output fps to match target duration
+            if is_preview:
+                # Preview: original 5s of input → 5s * speed_factor output
+                target_duration = min(
+                    5.0 * video_speed_factor, self.calculated_target_total
+                )
+            else:
+                target_duration = self.calculated_target_total
+
+            if target_duration <= 0:
+                target_duration = total_output_frames / max(
+                    self.source_fps, 24.0
+                )
+
+            output_fps = total_output_frames / target_duration
+            print(f"[RIFE] Step 3: assembling video at {output_fps:.2f} fps "
+                  f"(target_duration={target_duration:.2f}s, frames={total_output_frames})", flush=True)
+
+            video_only = os.path.join(tmpdir, "video_only.mp4")
+            assemble_cmd = [
+                ffmpeg_bin,
+                "-framerate", f"{output_fps:.4f}",
+                "-i", os.path.join(output_frames_dir, "%07d.png"),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-crf", "18",
+                "-preset", "medium",
+                "-y", video_only,
+            ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *assemble_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError("Failed to assemble interpolated video")
+
+            # ── Step 4: Handle audio ──
+            if self.has_audio:
+                self.processing_status = (
+                    "Processing audio with pitch preservation..."
+                )
+                self.processing_progress = 85
+                yield
+
+                audio_only = os.path.join(tmpdir, "audio_only.m4a")
+
+                self.using_rubberband = False
+                if ffmpeg_has_rubberband:
+                    audio_filter = self._build_rubberband_filter(tempo)
+                    self.using_rubberband = True
+                    print(f"[RIFE] Step 4: audio via rubberband (pitch-preserved)", flush=True)
+                else:
+                    audio_filter = self._build_atempo_chain(tempo)
+                    print(f"[RIFE] Step 4: audio via atempo chain (basic)", flush=True)
+
+                audio_cmd = [
+                    ffmpeg_bin, "-i", str(input_path),
+                    "-vn", "-af", audio_filter,
+                ]
+                if is_preview:
+                    audio_cmd.extend(["-t", f"{target_duration:.3f}"])
+                audio_cmd.extend(["-y", audio_only])
+
+                proc = await asyncio.create_subprocess_exec(
+                    *audio_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                await proc.wait()
+
+                if proc.returncode == 0:
+                    # ── Step 5: Merge video + audio ──
+                    self.processing_status = "Merging video and audio..."
+                    self.processing_progress = 93
+                    yield
+
+                    merge_cmd = [
+                        ffmpeg_bin,
+                        "-i", video_only,
+                        "-i", audio_only,
+                        "-c:v", "copy",
+                        "-c:a", "aac",
+                        "-shortest",
+                        "-y", str(output_path),
+                    ]
+                    proc = await asyncio.create_subprocess_exec(
+                        *merge_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                    )
+                    await proc.wait()
+                    if proc.returncode != 0:
+                        print("[WARN] Merge failed, using video-only output", flush=True)
+                        shutil.copy2(video_only, str(output_path))
+                else:
+                    print("[WARN] Audio processing failed, using video-only output", flush=True)
+                    shutil.copy2(video_only, str(output_path))
+            else:
+                shutil.copy2(video_only, str(output_path))
+
+        finally:
+            try:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass
 
     async def _process_ffmpeg(self, is_preview: bool = False):
         """Helper to run ffmpeg command for processing or preview."""
@@ -307,6 +589,27 @@ class VideoState(rx.State):
             ffmpeg_has_minterpolate = self._ffmpeg_has_minterpolate(ffmpeg_bin)
             video_speed_factor = 1.0 / ratio
             tempo = ratio
+
+            print("=" * 60, flush=True)
+            print("[PROCESS] Starting video processing", flush=True)
+            print(f"[PROCESS] Mode: {'preview (5s)' if is_preview else 'full video'}", flush=True)
+            print(f"[PROCESS] Input: {self.uploaded_file}", flush=True)
+            print(f"[PROCESS] Source FPS: {self.source_fps}", flush=True)
+            print(f"[PROCESS] Resolution: {self.width}x{self.height}", flush=True)
+            print(f"[PROCESS] Has audio: {self.has_audio}", flush=True)
+            print(f"[PROCESS] Duration: {self.duration_seconds:.2f}s -> Target: {self.calculated_target_total:.2f}s", flush=True)
+            print(f"[PROCESS] Speed ratio: {ratio:.4f} (video_speed_factor={video_speed_factor:.4f}, tempo={tempo:.4f})", flush=True)
+            if video_speed_factor > 1.0:
+                print(f"[PROCESS] Direction: SLOW DOWN (need frame interpolation)", flush=True)
+            elif video_speed_factor < 1.0:
+                print(f"[PROCESS] Direction: SPEED UP", flush=True)
+            else:
+                print(f"[PROCESS] Direction: NO CHANGE", flush=True)
+            print(f"[PROCESS] ffmpeg binary: {ffmpeg_bin}", flush=True)
+            print(f"[PROCESS] ffmpeg has rubberband: {ffmpeg_has_rubberband}", flush=True)
+            print(f"[PROCESS] ffmpeg has minterpolate: {ffmpeg_has_minterpolate}", flush=True)
+            print(f"[PROCESS] RIFE model available: {self._is_rife_available()}", flush=True)
+            print("=" * 60, flush=True)
             output_filename = (
                 f"preview_{self.uploaded_file}"
                 if is_preview
@@ -315,6 +618,50 @@ class VideoState(rx.State):
             output_path = upload_dir / output_filename
             if output_path.exists():
                 output_path.unlink()
+
+            # --- RIFE AI frame interpolation for slow-down ---
+            use_rife = (
+                video_speed_factor > 1.0
+                and self.source_fps > 0
+                and self._is_rife_available()
+            )
+            print(f"[DECISION] Use RIFE? {use_rife} "
+                  f"(slow_down={video_speed_factor > 1.0}, "
+                  f"has_fps={self.source_fps > 0}, "
+                  f"rife_ready={self._is_rife_available()})", flush=True)
+            if use_rife:
+                try:
+                    print("[PATH] >>> Using PATH 1: RIFE AI deep learning on Apple MPS GPU", flush=True)
+                    self.using_rife = True
+                    async for _ in self._process_with_rife(
+                        input_path, output_path, video_speed_factor, is_preview
+                    ):
+                        yield
+                    self.processing_progress = 100
+                    if is_preview:
+                        self.preview_file = output_filename
+                        self.preview_ready = True
+                        self.processing_status = (
+                            "Preview ready! "
+                            "(RIFE AI frame interpolation on Apple Metal GPU)"
+                        )
+                    else:
+                        self.processed_file = output_filename
+                        self.is_processed = True
+                        self.processing_status = (
+                            "Processing complete! "
+                            "(RIFE AI frame interpolation on Apple Metal GPU)"
+                        )
+                    yield
+                    return
+                except Exception as rife_err:
+                    print(f"[WARN] [PATH] RIFE failed, falling back to ffmpeg: {rife_err}", flush=True)
+                    self.using_rife = False
+                    self.processing_progress = 0
+                    if output_path.exists():
+                        output_path.unlink()
+            # --- End RIFE section, fall through to ffmpeg ---
+
             video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
             self.using_optical_flow = False
             if (
@@ -329,8 +676,16 @@ class VideoState(rx.State):
                     "mi_mode=mci:mc_mode=aobmc:vsbmc=1[v]"
                 )
                 self.using_optical_flow = True
+                print(f"[PATH] >>> Using PATH 2: ffmpeg minterpolate "
+                      f"(traditional optical flow, NOT deep learning, CPU only)", flush=True)
+                print(f"[PATH] minterpolate target_fps={target_fps:.3f}", flush=True)
             else:
                 video_filter = f"[0:v]setpts=PTS*{video_speed_factor}[v]"
+                print(f"[PATH] >>> Using PATH 3: ffmpeg setpts only "
+                      f"(pure timestamp change, NO frame interpolation)", flush=True)
+                if video_speed_factor > 1.0:
+                    print(f"[PATH] WARNING: Slow-down without interpolation "
+                          f"will look choppy/stuttery", flush=True)
             has_audio = self.has_audio
             filter_complex = video_filter
             self.using_rubberband = False
@@ -338,9 +693,14 @@ class VideoState(rx.State):
                 if ffmpeg_has_rubberband:
                     audio_filter = self._build_rubberband_filter(tempo)
                     self.using_rubberband = True
+                    print(f"[AUDIO] Using rubberband (pitch-preserved, high quality)", flush=True)
                 else:
                     audio_filter = self._build_atempo_chain(tempo)
+                    print(f"[AUDIO] Using atempo chain (basic, no pitch preservation)", flush=True)
                 filter_complex = f"{video_filter};[0:a]{audio_filter}[a]"
+            else:
+                print(f"[AUDIO] No audio track detected", flush=True)
+            print(f"[FFMPEG] filter_complex: {filter_complex}", flush=True)
             cmd = [
                 ffmpeg_bin,
                 "-progress",
@@ -441,7 +801,7 @@ class VideoState(rx.State):
 
             if process.returncode != 0:
                 error_log = "\n".join(output_tail)
-                logging.error(f"FFmpeg error: {error_log}")
+                print(f"[ERROR] FFmpeg error: {error_log}", flush=True)
                 raise RuntimeError("FFmpeg processing failed. Check logs.")
             self.processing_progress = 100
             if is_preview:
@@ -454,7 +814,8 @@ class VideoState(rx.State):
                 self.processing_status = "Processing complete!"
             yield
         except Exception as e:
-            logging.exception(f"Processing error: {e}")
+            import traceback; traceback.print_exc()
+            print(f"[ERROR] Processing error: {e}", flush=True)
             self.error_message = f"Error: {str(e)}"
             self.processing_status = "Failed"
             yield
@@ -501,6 +862,7 @@ class VideoState(rx.State):
         self.is_processed = False
         self.error_message = ""
         self.using_optical_flow = False
+        self.using_rife = False
         self.target_hours = "0"
         self.target_minutes = "0"
         self.target_seconds = "0"
